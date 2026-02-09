@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This repository processes forestry data for IWC (International Woodland Company) — specifically the "Boothill" tract in Georgia (378 stands, ~12,400 acres) — into inputs for the GCBM (Generic Carbon Budget Model) with the mojadata tiler.
+This repository processes forestry data for IWC (International Woodland Company) — specifically the "Boothill" tract in Georgia (378 spatial features, ~12,400 acres) — into inputs for the GCBM (Generic Carbon Budget Model) with the mojadata tiler.
 
 ## Repository Structure
 
@@ -21,13 +21,13 @@ Run with: `cd src && python run_pipeline.py --skip-aidb`
 
 | Module | Purpose |
 |--------|---------|
-| `config.py` | Paths, unit conversions, species/disturbance mappings, simulation params |
-| `01_ingest.py` | Loads spatial, 3 yield CSVs, condition Excel, schedule; validates cross-source |
-| `02_classifiers.py` | 5 GCBM classifiers: species, origin, si_class, growth_period, mgmt_trajectory |
-| `03_yield_curves.py` | Converts yield tables to GCBM format (m3/ha); Yields1 for current, Yields2 for post-regen |
-| `04_inventory.py` | Starting inventory GeoPackage (300 forest stands with classifiers + geometry) |
-| `05_disturbances.py` | Extracts events, calculates thinning removal %, writes disturbances.gpkg |
-| `06_transitions.py` | Post-disturbance yield curve transition rules |
+| `config.py` | Paths, unit conversions, species/disturbance mappings, simulation params, stand key corrections |
+| `01_ingest.py` | Loads spatial, 3 yield CSVs, condition Excel, schedule; applies stand key renames; validates cross-source |
+| `02_classifiers.py` | 6 GCBM classifiers: stand_key, species, origin, si_class, growth_period, mgmt_trajectory |
+| `03_yield_curves.py` | Converts yield tables to GCBM format (m3/ha); applies post-thin qP volume adjustment |
+| `04_inventory.py` | Starting inventory GeoPackage (301 forest features with classifiers + geometry) |
+| `05_disturbances.py` | Extracts events, calculates thinning removal %, classifies partial clearcuts, writes disturbances.gpkg |
+| `06_transitions.py` | Post-disturbance yield curve transition rules (incl. partial CC = no transition) |
 | `07_aidb_thinning.py` | Adds thinning disturbance matrices to AIDB via `aidb_disturbance_manager.py` |
 | `08_tiler_config.py` | Generates mojadata tiler script |
 | `run_pipeline.py` | Orchestrates steps 01-08 |
@@ -37,7 +37,7 @@ Run with: `cd src && python run_pipeline.py --skip-aidb`
 - `classifiers.csv` — SIT-format classifier definitions
 - `yield_curves.csv` — Merchantable volume curves (m3/ha) by classifier combo, ages 1-78
 - `inventory.gpkg` — Starting inventory with classifiers, age, historical disturbance, geometry
-- `disturbances.gpkg` — All 1,386 disturbance events with year column, disturbance type, removal %
+- `disturbances.gpkg` — All 1,386 disturbance events (422 CC, 394 SP, 339 1st thin, 208 2nd thin, 23 partial CC) with year, disturbance type, removal %
 - `disturbance_events.csv` — SIT-format disturbance events with timestep
 - `transition_rules.csv` — Post-disturbance classifier transitions
 - `thinning_disturbance_mapping.csv` — Maps removal % to AIDB disturbance type names
@@ -50,8 +50,17 @@ Run with: `cd src && python run_pipeline.py --skip-aidb`
 - **Yields2** — Generic regeneration curves for post-clearcut (2nd) rotation, keyed by site index (SI50-SI100) + species (LB/LL/SL) + trajectory.
 - **Yields3** — Thinning simulation overrides; same structure as Yields1 but with `qP_TOP4M3PA` (removed volume) populated. Pipe-delimited values at thin ages (before|after).
 
+### Post-Thin Volume Adjustment
+`03_yield_curves.py` adds removed volume (`qP_TOP4M3PA`) back to post-thin softwood curves as a constant offset. This prevents double-counting: GCBM's disturbance matrix is the sole mechanism for removing volume, and the yield curve must show the "as if no thin happened" trajectory.
+
 ### Thinning Volume Removal Calculation
 See `src/05_disturbances.py`. The schedule's TH9/TH10 columns (thin1/thin2) represent state BEFORE the action row, NOT the action parameter. The actual thin age comes from the AGE column. 73% of thinning events are 2nd-rotation (after clearcut) and must use Yields2.
+
+### Partial (Split-Year) Clearcuts
+10 stands have clearcuts split across 2-4 years due to harvest constraints. Intermediate events → "XX.XX% clearcut" (area/condition_AREA × 100), final → standard "Clearcut". Partial CCs trigger no yield curve transition (only the final Clearcut does). 23 events reclassified, 17 unique partial CC percentages.
+
+### Stand Key Corrections
+BH5149-1-997 is renamed → BH5149-1-162 at load time (config `STAND_KEY_RENAMES`). This reunifies a split polygon (5.79 + 10.82 = 16.61 ac = condition file area). Attributes are copied from the target stand so the fragment is correctly classified as forest.
 
 ### iwc_id Format
 - Yields1/3: `BH1427-1-1-TPA-XX-BA-XX-T1-19-T2-0-F1-0-F2-0` (stand-specific)
@@ -64,3 +73,11 @@ pandas>=2.0, geopandas>=0.14, openpyxl>=3.1, pyogrio>=0.7, shapely>=2.0, numpy>=
 ```
 
 AIDB step additionally requires: `pyodbc`, `sqlalchemy` (with MS Access driver).
+
+## Remaining Work
+
+- **2025 actual disturbances**: Set up disturbances for activities that occurred in 2025 (prior to sim start year 2026). These are real/historical events, not projected.
+- **AIDB editing**: Add all disturbance matrices to the AIDB:
+  - Commercial thinning matrices (scaled from 50% thin template, ~40+ unique percentages)
+  - Partial clearcut matrices (scaled from clearcut template, ~20 unique percentages)
+  - Verify/add standard Clearcut and Site_Prep disturbance types

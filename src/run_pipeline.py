@@ -46,7 +46,8 @@ def main(aidb_path=None, dry_run=False, skip_aidb=False):
     # Step 5: Build disturbance layers
     disturbances = import_module("05_disturbances")
     events, events_geo = disturbances.run(
-        data["schedule"], data["spatial"], data["yields1"], data["yields3"], data["yields2"]
+        data["schedule"], data["spatial"], data["yields1"], data["yields3"], data["yields2"],
+        condition_initial=data["condition_initial"],
     )
 
     # Step 6: Build transition rules

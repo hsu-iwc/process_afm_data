@@ -74,35 +74,42 @@ def build_transition_rules(events, stands):
         # Target classifiers (after disturbance)
         tgt = dict(src)  # start with copy
 
+        # Schedule columns thin1/thin2 reflect state BEFORE this action:
+        # At aHTHIN1: thin1=0, actual thin age = AGE column (evt["age"])
+        # At aHTHIN2: thin1=<prior 1st thin age>, actual thin age = AGE column
+        age = int(evt["age"])
+        prior_thin1 = int(evt["thin1"])
+        fert1 = int(evt["fert1"])
+        fert2 = int(evt["fert2"])
+
         if dist_type == "Clearcut":
             # Transition to post_regen growth period
             tgt["growth_period"] = GROWTH_PERIOD_POST_REGEN
             # Species may change (replanting)
             tgt["species"] = _CLEARCUT_SPECIES_MAP.get(src["species"], src["species"])
-            # Trajectory for new rotation — use a default baseline or planned trajectory
-            # In practice this comes from the next rotation's planned management
+            # Trajectory for new rotation — starts at no-thin baseline
             tgt["mgmt_trajectory"] = "T1-0-T2-0-F1-0-F2-0"
             reset_age = 0
 
         elif dist_type == "1st_Thin":
-            # Move to thinned trajectory; age does NOT reset
-            thin1_age = int(evt["thin1"])
-            fert1 = int(evt["fert1"])
-            fert2 = int(evt["fert2"])
-            tgt["mgmt_trajectory"] = f"T1-{thin1_age}-T2-0-F1-{fert1}-F2-{fert2}"
+            # Move to post-1st-thin trajectory; age does NOT reset
+            actual_thin1_age = age
+            tgt["mgmt_trajectory"] = f"T1-{actual_thin1_age}-T2-0-F1-{fert1}-F2-{fert2}"
             reset_age = -1  # -1 = no age reset
 
         elif dist_type == "2nd_Thin":
-            # Move to T1+T2 trajectory; age does NOT reset
-            thin1_age = int(evt["thin1"])
-            thin2_age = int(evt["thin2"])
-            fert1 = int(evt["fert1"])
-            fert2 = int(evt["fert2"])
-            tgt["mgmt_trajectory"] = f"T1-{thin1_age}-T2-{thin2_age}-F1-{fert1}-F2-{fert2}"
+            # Move to post-2nd-thin trajectory; age does NOT reset
+            actual_thin2_age = age
+            tgt["mgmt_trajectory"] = f"T1-{prior_thin1}-T2-{actual_thin2_age}-F1-{fert1}-F2-{fert2}"
             reset_age = -1
 
         elif dist_type == "Site_Prep":
             # No yield curve change
+            reset_age = -1
+
+        elif dist_type.endswith("% clearcut"):
+            # Partial (split-year) clearcut — no yield curve change.
+            # Only the final standard "Clearcut" triggers transition.
             reset_age = -1
 
         else:

@@ -40,9 +40,9 @@ def build_inventory(spatial, stands):
     inv = spatial[["STAND_KEY", "STAND_AGE", "AREA_HA", "IS_FOREST", "geometry"]].copy()
     inv = inv.rename(columns={"STAND_KEY": "stand_key", "STAND_AGE": "initial_age", "AREA_HA": "area_ha"})
 
-    # origin is already in CLASSIFIER_NAMES, no need to add it again
-    clf_cols = ["stand_key"] + CLASSIFIER_NAMES
-    stands_sub = stands[clf_cols].drop_duplicates(subset=["stand_key"])
+    # stand_key is the merge key AND a classifier; only select non-key classifiers
+    non_key_clfs = [c for c in CLASSIFIER_NAMES if c != "stand_key"]
+    stands_sub = stands[["stand_key"] + non_key_clfs].drop_duplicates(subset=["stand_key"])
 
     inv = inv.merge(stands_sub, on="stand_key", how="left")
 
@@ -66,9 +66,9 @@ def build_inventory(spatial, stands):
     print(f"  Forest (included): {len(forest_inv)}")
     print(f"  Non-forest (excluded): {len(nonforest)}")
 
-    # Select output columns
+    # Select output columns (stand_key is already in CLASSIFIER_NAMES)
     out_cols = (
-        ["stand_key"] + CLASSIFIER_NAMES +
+        CLASSIFIER_NAMES +
         ["initial_age", "area_ha", "delay", "land_class",
          "historical_disturbance_type", "last_pass_disturbance_type",
          "geometry"]

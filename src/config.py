@@ -125,10 +125,22 @@ HISTORICAL_DISTURBANCE_MAP = {
 }
 
 # =============================================================================
+# STAND KEY CORRECTIONS (applied to spatial output, not source files)
+# =============================================================================
+
+# BH5149-1-162 was split into two polygons in the shapefile (5.79 + 10.82 = 16.61 ac)
+# but the condition file retains the original unsplit area (16.61 ac) under BH5149-1-162.
+# Rename the fragment so both polygons share the correct stand key.
+STAND_KEY_RENAMES = {
+    "BH5149-1-997": "BH5149-1-162",
+}
+
+# =============================================================================
 # CLASSIFIER DEFINITIONS
 # =============================================================================
 
 CLASSIFIER_NAMES = [
+    "stand_key",
     "species",
     "origin",
     "si_class",

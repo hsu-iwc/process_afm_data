@@ -28,6 +28,7 @@ from config import (
     ORIGIN_LONG_TO_CODE,
     NON_DISTURBANCE_ACTIONS,
     ACTION_TO_DISTURBANCE,
+    STAND_KEY_RENAMES,
 )
 
 
@@ -58,6 +59,27 @@ def load_spatial(path=SHAPEFILE):
         (gdf["DOMSPECLAB"] == "UD")
         | (gdf["ORIGIN"] == "Open")
     )
+
+    # Apply stand key corrections (split polygons, etc.)
+    # When renaming a fragment, also copy key attributes from the target stand
+    # so the fragment inherits the correct species, origin, and forest flag.
+    if STAND_KEY_RENAMES:
+        attr_cols = ["DOMSPECLAB", "DOM_SPEC", "ORIGIN", "ORIGIN_CODE"]
+        for old_key, new_key in STAND_KEY_RENAMES.items():
+            old_mask = gdf["STAND_KEY"] == old_key
+            new_mask = gdf["STAND_KEY"] == new_key
+            if old_mask.any() and new_mask.any():
+                target_row = gdf.loc[new_mask].iloc[0]
+                gdf.loc[old_mask, "STAND_KEY"] = new_key
+                for col in attr_cols:
+                    if col in gdf.columns:
+                        gdf.loc[old_mask, col] = target_row[col]
+                # Recompute IS_FOREST for renamed features
+                gdf.loc[old_mask, "IS_FOREST"] = ~(
+                    (gdf.loc[old_mask, "DOMSPECLAB"] == "UD")
+                    | (gdf.loc[old_mask, "ORIGIN"] == "Open")
+                )
+                print(f"  Stand key rename: {old_key} -> {new_key} (attributes copied)")
 
     print(f"  Spatial: {len(gdf)} stands loaded")
     print(f"    Forest: {gdf['IS_FOREST'].sum()}, Non-forest: {(~gdf['IS_FOREST']).sum()}")

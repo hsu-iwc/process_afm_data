@@ -54,6 +54,7 @@ def main():
 
     # Classifiers
     classifiers = [
+        ClassifierLayer("stand_key", INV_PATH, "stand_key"),
         ClassifierLayer("species", INV_PATH, "species"),
         ClassifierLayer("origin", INV_PATH, "origin"),
         ClassifierLayer("si_class", INV_PATH, "si_class"),

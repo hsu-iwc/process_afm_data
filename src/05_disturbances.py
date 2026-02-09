@@ -2,10 +2,16 @@
 05_disturbances.py — Disturbance Layers
 =========================================
 Extracts disturbance events from the management schedule, calculates
-thinning volume removal percentages, and builds spatial disturbance layers.
+thinning volume removal percentages, detects partial (split-year) clearcuts,
+and builds spatial disturbance layers.
+
+Partial clearcuts: When a harvest constraint splits a clearcut across multiple
+years, intermediate events become "XX.XX% clearcut" (area proportion using
+condition file AREA as denominator). The final event in each rotation cluster
+remains a standard "Clearcut" which triggers the yield curve transition.
 
 Outputs:
-  - Per-year GeoPackages in output/gcbm_input/disturbances/
+  - disturbances.gpkg (single file with year column)
   - disturbance_events.csv in SIT format
 """
 
@@ -70,6 +76,94 @@ def extract_disturbance_events(schedule):
     r1 = (thin_events["rotation"] == 1).sum()
     r2 = (thin_events["rotation"] == 2).sum()
     print(f"    Thinning rotation split: {r1} 1st-rotation, {r2} 2nd-rotation")
+
+    return events
+
+
+# =============================================================================
+# 6a2: CLASSIFY PARTIAL (SPLIT-YEAR) CLEARCUTS
+# =============================================================================
+
+# Stands to skip from partial CC detection (known data issues)
+_PARTIAL_CC_SKIP = set()
+
+
+def classify_partial_clearcuts(events, condition_initial):
+    """
+    Detect split-year clearcuts and reclassify intermediate events.
+
+    When a harvest constraint splits a clearcut across multiple years for the
+    same stand, the intermediate events become "XX.XX% clearcut" and the final
+    event in each rotation cluster stays as "Clearcut".
+
+    Uses the condition file AREA as the denominator for % calculation.
+    """
+    # Build condition area lookup
+    cond_area = condition_initial.set_index("stand_key")["AREA"].to_dict()
+
+    cc = events[events["disturbance_type"] == "Clearcut"].copy()
+    if len(cc) == 0:
+        return events
+
+    # Find stands with multiple CC events
+    cc_counts = cc.groupby("stand_key").size()
+    multi_cc_stands = set(cc_counts[cc_counts > 1].index) - _PARTIAL_CC_SKIP
+
+    if not multi_cc_stands:
+        print("  No split-year clearcuts detected.")
+        return events
+
+    # For each multi-CC stand, cluster events into rotations (gap > 10yr = new rotation)
+    n_reclassified = 0
+
+    for sk in sorted(multi_cc_stands):
+        stand_area = cond_area.get(sk)
+        if stand_area is None or stand_area <= 0:
+            continue
+
+        sk_cc = cc[cc["stand_key"] == sk].sort_values("year")
+        sk_indices = sk_cc.index.tolist()
+        sk_years = sk_cc["year"].values
+        sk_areas = sk_cc["area"].values
+
+        # Cluster into rotations by year gap
+        clusters = [[0]]
+        for i in range(1, len(sk_years)):
+            if sk_years[i] - sk_years[i - 1] > 10:
+                clusters.append([i])
+            else:
+                clusters[-1].append(i)
+
+        for cluster in clusters:
+            if len(cluster) <= 1:
+                continue  # single event = standard Clearcut, no change
+
+            cluster_area = sum(sk_areas[i] for i in cluster)
+            # Only reclassify if the cluster has genuine partial events
+            # (individual events < ~95% of stand area)
+            has_partial = any(sk_areas[i] / stand_area < 0.95 for i in cluster)
+            if not has_partial:
+                continue
+
+            # All but the last event → "XX.XX% clearcut"
+            for i in cluster[:-1]:
+                idx = sk_indices[i]
+                pct = round(sk_areas[i] / stand_area * 100, 2)
+                events.loc[idx, "disturbance_type"] = f"{pct}% clearcut"
+                n_reclassified += 1
+
+            # Last event stays "Clearcut" — triggers transition
+
+    if n_reclassified > 0:
+        print(f"  Partial clearcuts: {n_reclassified} events reclassified across "
+              f"{len(multi_cc_stands)} stands")
+
+        # Print summary of unique partial CC percentages
+        partial_events = events[events["disturbance_type"].str.endswith("% clearcut")]
+        pcts = partial_events["disturbance_type"].str.replace("% clearcut", "").astype(float)
+        print(f"    Unique partial CC percentages: {sorted(pcts.unique())}")
+    else:
+        print("  No split-year clearcuts requiring reclassification.")
 
     return events
 
@@ -259,8 +353,13 @@ def calc_thinning_pct(events, yields1, yields3, yields2):
         left_index=True, right_index=True, how="left",
     )
 
-    # Clearcuts: 97% removal (standard)
+    # Standard clearcuts: 97% removal
     events.loc[events["disturbance_type"] == "Clearcut", "pct_volume_removed"] = 97.0
+    # Partial clearcuts: use the area-based percentage
+    partial_mask = events["disturbance_type"].str.endswith("% clearcut", na=False)
+    for idx in events[partial_mask].index:
+        pct_str = events.loc[idx, "disturbance_type"].replace("% clearcut", "")
+        events.loc[idx, "pct_volume_removed"] = float(pct_str)
     # Site prep: 0% volume removal (preparatory, non-harvest)
     events.loc[events["disturbance_type"] == "Site_Prep", "pct_volume_removed"] = 0.0
 
@@ -319,13 +418,18 @@ def build_spatial_disturbance_layers(events, spatial):
 # MAIN
 # =============================================================================
 
-def run(schedule, spatial, yields1, yields3, yields2):
+def run(schedule, spatial, yields1, yields3, yields2, condition_initial=None):
     """Main entry point."""
     print("=" * 60)
     print("05_disturbances: Building disturbance layers")
     print("=" * 60)
 
     events = extract_disturbance_events(schedule)
+
+    # Classify partial (split-year) clearcuts before calculating %
+    if condition_initial is not None:
+        events = classify_partial_clearcuts(events, condition_initial)
+
     events = calc_thinning_pct(events, yields1, yields3, yields2)
     events_geo = build_spatial_disturbance_layers(events, spatial)
 
@@ -335,4 +439,5 @@ def run(schedule, spatial, yields1, yields3, yields2):
 if __name__ == "__main__":
     from _01_ingest import ingest_all
     data = ingest_all()
-    run(data["schedule"], data["spatial"], data["yields1"], data["yields3"], data["yields2"])
+    run(data["schedule"], data["spatial"], data["yields1"], data["yields3"], data["yields2"],
+        condition_initial=data["condition_initial"])
