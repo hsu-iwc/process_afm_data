@@ -76,6 +76,16 @@ AIDB step additionally requires: `pyodbc`, `sqlalchemy` (with MS Access driver).
 
 ## Remaining Work
 
+- **Zero-volume Yields1 stands**: 2 forest stands have Yields1 curves but all values are zero:
+  - BH6112-1-205 (LB, Natural, Age 86, SI=47, 11.7 ac)
+  - BH5132-1-119 (PH, Natural, Age 86, SI=50, 118.9 ac)
+  - Fix: substitute a Yields2 regen curve with matching/similar SI, even though these are 1st-rotation stands outside the normal regen age window.
+- **3 missing HH stands**: 3 Hard Hardwood forest stands have no Yields1 entry at all (~103 ac total, all in tract BH6125, Natural origin, age 11, TreatmentType=NO, no scheduled management):
+  - BH6125-1-299 (SI=58, 68.9 ac)
+  - BH6125-1-315 (SI=95 shapefile / 71 condition, 8.5 ac)
+  - BH6125-1-316 (SI=50 shapefile / 38 condition, 25.8 ac)
+  - Note: SI values differ between shapefile and condition file for 315 and 316.
+  - TODO: Decide on approach — assign generic HH growth curve or leave as zero.
 - **2025 actual disturbances**: Set up disturbances for activities that occurred in 2025 (prior to sim start year 2026). These are real/historical events, not projected.
 - **AIDB editing**: Add all disturbance matrices to the AIDB:
   - Commercial thinning matrices (scaled from 50% thin template, ~40+ unique percentages)
